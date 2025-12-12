@@ -13,7 +13,6 @@
 - [Keycloak SSO](#keycloak-sso)
 - [Deployment](#deployment)
 - [API Documentation](#api-documentation)
-- [Testing](#testing)
 - [Configuration](#configuration)
 - [Security](#security)
 
@@ -137,7 +136,6 @@ The platform uses **Keycloak** for Single Sign-On (SSO) authentication:
 1) Clone and prepare environment
 ```bash
 cd PhishingPlatform
-cp env.example .env   # fill in if you have real SMTP / public URL
 ```
 
 2) Build images
@@ -158,7 +156,6 @@ docker stack deploy -c docker-compose.yml phishing
 5) Check status
 ```bash
 docker stack services phishing
-# all services should show REPLICAS X/X
 ```
 
 6) Quick access
@@ -268,13 +265,6 @@ The platform automatically imports a pre-configured Keycloak realm with:
 
 Full API documentation available at `/api/docs` (Swagger UI) or `/api/redoc` (ReDoc).
 
-## Testing (dev/local)
-- For end-to-end verification in Swarm:
-  - SSO login as Super Admin.
-  - Create a new company.
-  - As Admin (e.g., `admin@demo.com`), create a campaign, add targets (user1/user2), start the campaign.
-  - Check emails in Mailpit (http://localhost:8025) and tracking (open/click).
-
 ## Configuration
 
 ### Environment Variables
@@ -339,12 +329,10 @@ PhishingPlatform/
 │   │   ├── schemas/        # Pydantic schemas
 │   │   ├── services/       # Business logic
 │   │   └── utils/          # Utilities
-│   ├── tests/              # Backend tests
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── mail-scheduler/          # Email Worker Service
 │   ├── app/
-│   ├── tests/
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── frontend/                # Next.js Frontend
@@ -364,7 +352,4 @@ PhishingPlatform/
 ├── docker-compose.dev.yml   # Development config
 └── README.md
 ```
-
-
-**Author:** Stamatie Mihnea-Stefan  
 
