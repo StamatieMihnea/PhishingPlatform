@@ -26,7 +26,7 @@ class EmailSender:
     
     def inject_tracking_pixel(self, html_content: str, tracking_token: str) -> str:
         """Inject tracking pixel into HTML email."""
-        tracking_pixel = f'<img src="{self.tracking_base_url}/api/v1/track/open/{tracking_token}" width="1" height="1" style="display:none;" alt="">'
+        tracking_pixel = f'<img src="{self.tracking_base_url}/open/{tracking_token}" width="1" height="1" style="display:none;" alt="">'
                 
         if '</body>' in html_content.lower():
             return html_content.replace('</body>', f'{tracking_pixel}</body>')
@@ -52,7 +52,7 @@ class EmailSender:
             "recipient_name": recipient_name,
             "tracking_token": tracking_token,
             "tracking_url": self.tracking_base_url,
-            "phishing_url": f"{self.tracking_base_url}/api/v1/track/click/",
+            "phishing_url": f"{self.tracking_base_url}/click/",
         }
         
         try:

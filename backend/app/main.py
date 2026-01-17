@@ -34,6 +34,10 @@ async def lifespan(app: FastAPI):
         from app.core.database import SessionLocal
         db = SessionLocal()
         try:
+            # Wait for Keycloak before initializing data (which creates users/roles)
+            from app.core.keycloak import keycloak_service
+            keycloak_service.wait_for_keycloak()
+            
             init_default_data(db)
             logger.info("Default data initialized successfully")
         finally:

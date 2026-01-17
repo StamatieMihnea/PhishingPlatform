@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phishing Awareness Training</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 600px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+
+        .icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #e74c3c;
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #27ae60;
+            font-size: 18px;
+            margin-bottom: 30px;
+        }
+
+        p {
+            color: #555;
+            line-height: 1.8;
+            margin-bottom: 20px;
+        }
+
+        .tips {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .tips h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .tips ul {
+            color: #555;
+            padding-left: 20px;
+        }
+
+        .tips li {
+            margin-bottom: 10px;
+        }
+
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+
+        .button:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="icon">🎣</div>
+        <h1>You Clicked a Phishing Link!</h1>
+        <p class="subtitle">Don't worry - this was a training exercise.</p>
+        <p>This was a simulated phishing email sent by your organization's security team to help you recognize and avoid
+            real phishing attacks.</p>
+        <div class="tips">
+            <h3>🛡️ How to Spot Phishing Emails:</h3>
+            <ul>
+                <li><strong>Check the sender</strong> - Verify the email address is legitimate</li>
+                <li><strong>Hover over links</strong> - Check where links actually lead before clicking</li>
+                <li><strong>Look for urgency</strong> - Phishing emails often create false urgency</li>
+                <li><strong>Check for errors</strong> - Look for spelling/grammar mistakes</li>
+                <li><strong>When in doubt</strong> - Contact the supposed sender through official channels</li>
+            </ul>
+        </div>
+        <p>Remember: Your organization will never ask for passwords or sensitive information via email.</p>
+        <a href="{{ frontend_url }}/training" class="button">Learn More About Phishing</a>
+    </div>
+</body>
+
+</html>

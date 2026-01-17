@@ -13,7 +13,7 @@ import { Plus, Target, Play, Square, Calendar, Trash2, Building2 } from 'lucide-
 
 export default function CampaignsPage() {
   const router = useRouter()
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, user } = useAuthStore()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [users, setUsers] = useState<User[]>([])
@@ -42,7 +42,7 @@ export default function CampaignsPage() {
         campaignsApi.list(),
         templatesApi.list(),
         usersApi.list(),
-        companiesApi.list(),
+        user?.role === 'SUPER_ADMIN' ? companiesApi.list() : Promise.resolve({ companies: [], total: 0 }),
       ])
       setCampaigns(campaignsData.campaigns || [])
       setTemplates(templatesData.templates || [])
@@ -58,7 +58,12 @@ export default function CampaignsPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await campaignsApi.create(formData)
+      const payload = {
+        ...formData,
+        company_id: formData.company_id || null,
+        template_id: formData.template_id || null,
+      }
+      await campaignsApi.create(payload)
       setShowCreateModal(false)
       setFormData({ name: '', description: '', template_id: '', target_user_ids: [], company_id: '' })
       fetchData()

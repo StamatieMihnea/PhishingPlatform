@@ -150,6 +150,7 @@ class TemplateService:
             "tracking_url": tracking_url or "https://example.com/track",
             "phishing_url": tracking_url or "https://example.com/phishing",
             "current_date": "2024-01-01",
+            "tracking_token": "dummy_preview_token",
         }
         
         try:

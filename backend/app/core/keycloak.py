@@ -9,6 +9,9 @@ from jose import jwt, JWTError
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2AuthorizationCodeBearer, HTTPBearer, HTTPAuthorizationCredentials
+from httpx import ConnectError, HTTPStatusError
+import time
+import asyncio
 
 from app.core.config import settings
 
@@ -399,6 +402,27 @@ class KeycloakService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to fetch user from Keycloak"
             )
+    def wait_for_keycloak(self, timeout: int = 300, interval: int = 5):
+        """Wait for Keycloak service to be ready."""
+        logger.info("Waiting for Keycloak to be ready...")
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            try:
+                # Try to fetch OIDC configuration which doesn't require auth
+                oidc_url = f"{self.server_url}/realms/{self.realm}/.well-known/openid-configuration"
+                with httpx.Client() as client:
+                    response = client.get(oidc_url, timeout=5.0)
+                    if response.status_code == 200:
+                        logger.info("Keycloak is ready!")
+                        return True
+            except (ConnectError, HTTPStatusError, Exception) as e:
+                logger.debug(f"Keycloak not ready yet: {e}")
+            
+            logger.info(f"Keycloak not ready. Retrying in {interval}s...")
+            time.sleep(interval)
+            
+        raise TimeoutError("Timed out waiting for Keycloak to become ready")
 
 
 keycloak_service = KeycloakService()
