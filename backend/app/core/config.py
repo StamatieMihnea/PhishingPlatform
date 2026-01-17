@@ -39,12 +39,15 @@ class Settings(BaseSettings):
     def RABBITMQ_URL(self) -> str:
         return f"amqp://{self.RABBITMQ_USER}:{self.RABBITMQ_PASSWORD}@{self.RABBITMQ_HOST}:{self.RABBITMQ_PORT}/{self.RABBITMQ_VHOST}"
     
-    KEYCLOAK_SERVER_URL: str = "http://keycloak:8080/auth" 
-    KEYCLOAK_PUBLIC_URL: str = "http://localhost/auth" 
+    # Defaults aligned to prod path (/auth). Dev overrides via docker-compose.dev to port 8080 with /auth.
+    KEYCLOAK_SERVER_URL: str = "http://keycloak:8080/auth"
+    KEYCLOAK_PUBLIC_URL: str = "http://localhost/auth"
     KEYCLOAK_REALM: str = "phishing-platform"
     KEYCLOAK_CLIENT_ID: str = "phishing-api"
     KEYCLOAK_CLIENT_SECRET: str = ""
     KEYCLOAK_ADMIN_CLIENT_ID: str = "admin-cli"
+    KEYCLOAK_ADMIN_USERNAME: str = "admin"
+    KEYCLOAK_ADMIN_PASSWORD: str = "admin"
     
     @property
     def KEYCLOAK_ISSUER(self) -> str:

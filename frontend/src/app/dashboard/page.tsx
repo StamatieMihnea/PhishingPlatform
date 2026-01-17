@@ -6,7 +6,7 @@ import Layout from '@/components/Layout'
 import StatsCard from '@/components/StatsCard'
 import { StatusBadge } from '@/components/Badge'
 import { useAuthStore } from '@/lib/store'
-import { dashboardApi, campaignsApi, companiesApi } from '@/lib/api'
+import { dashboardApi, campaignsApi, companiesApi, usersApi } from '@/lib/api'
 import {
   Target,
   Users,
@@ -61,18 +61,23 @@ export default function DashboardPage() {
         setRecommendations(recsData)
       } else {
         // Admin dashboard
-        const campaignsData = await campaignsApi.list()
+        const [campaignsData, usersData] = await Promise.all([
+          campaignsApi.list(),
+          usersApi.list(),
+        ])
         setCampaigns(campaignsData.campaigns || [])
         
         // Calculate stats from campaigns
         const totalCampaigns = campaignsData.campaigns?.length || 0
         const runningCampaigns = campaignsData.campaigns?.filter((c: any) => c.status === 'RUNNING').length || 0
         const completedCampaigns = campaignsData.campaigns?.filter((c: any) => c.status === 'COMPLETED').length || 0
+        const totalUsers = usersData.users?.length || 0
         
         setStats({
           total_campaigns: totalCampaigns,
           running_campaigns: runningCampaigns,
           completed_campaigns: completedCampaigns,
+          total_users: totalUsers,
         })
       }
     } catch (error) {
@@ -251,7 +256,7 @@ export default function DashboardPage() {
           />
           <StatsCard
             title="Total Users"
-            value={stats?.total_users || '-'}
+            value={stats?.total_users ?? 0}
             icon={Users}
           />
         </div>

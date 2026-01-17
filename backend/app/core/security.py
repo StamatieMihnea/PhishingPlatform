@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.keycloak import keycloak_service, KeycloakUser, get_current_keycloak_user
+from app.models.user import User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -144,6 +145,36 @@ async def get_current_user(
     
     try:
         token_payload = keycloak_service.decode_token(token)
+        if not token_payload.get("email"):
+            # Attempt to enrich via userinfo; still require email after that
+            try:
+                userinfo = keycloak_service.get_userinfo_sync(token)  # type: ignore[attr-defined]
+                token_payload.update({
+                    "email": userinfo.get("email"),
+                    "email_verified": userinfo.get("email_verified", False),
+                    "given_name": userinfo.get("given_name"),
+                    "family_name": userinfo.get("family_name"),
+                    "preferred_username": userinfo.get("preferred_username"),
+                })
+            except Exception:
+                # If userinfo fails (e.g., missing scope), try admin lookup
+                try:
+                    kc_user = keycloak_service.get_user_by_id_admin(token_payload.get("sub", ""))
+                    token_payload.update({
+                        "email": kc_user.get("email"),
+                        "email_verified": kc_user.get("emailVerified", False),
+                        "given_name": kc_user.get("firstName"),
+                        "family_name": kc_user.get("lastName"),
+                        "preferred_username": kc_user.get("username"),
+                        "company_id": kc_user.get("attributes", {}).get("company_id", [None])[0] if kc_user.get("attributes") else None,
+                    })
+                except Exception:
+                    pass
+        if not token_payload.get("email"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email claim missing in token; enable email scope/mapper in Keycloak."
+            )
         keycloak_user = KeycloakUser(token_payload)
         return AuthenticatedUser.from_keycloak(keycloak_user)
     except Exception as keycloak_error:
@@ -212,24 +243,85 @@ def require_role(allowed_roles: list):
 
 
 async def require_super_admin(
-    current_user: AuthenticatedUser = Depends(get_current_active_user)
-) -> AuthenticatedUser:
-    """Require super admin role."""
+    current_user: AuthenticatedUser = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """Require super admin role and ensure a persisted DB user."""
     if current_user.role != 'SUPER_ADMIN':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin access required"
         )
-    return current_user
+    if not current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is required from identity provider"
+        )
+    db_user = db.query(User).filter(User.id == current_user.id).first()
+    if db_user:
+        return db_user
+    email_user = db.query(User).filter(User.email == current_user.email).first()
+    if email_user:
+        email_user.id = current_user.id
+        email_user.role = UserRole.SUPER_ADMIN
+        db.commit()
+        db.refresh(email_user)
+        return email_user
+    db_user = User(
+        id=current_user.id,
+        email=current_user.email,
+        password_hash=get_password_hash("TempPassword123!"),
+        first_name=current_user.first_name or "SSO",
+        last_name=current_user.last_name or "User",
+        role=UserRole.SUPER_ADMIN,
+        company_id=None,
+        is_active=True,
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
 
 
 async def require_admin(
-    current_user: AuthenticatedUser = Depends(get_current_active_user)
-) -> AuthenticatedUser:
-    """Require admin or super admin role."""
+    current_user: AuthenticatedUser = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """Require admin or super admin role and ensure a persisted DB user."""
     if current_user.role not in ['ADMIN', 'SUPER_ADMIN']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
-    return current_user
+    if not current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is required from identity provider"
+        )
+    db_user = db.query(User).filter(User.id == current_user.id).first()
+    if db_user:
+        return db_user
+    email_user = db.query(User).filter(User.email == current_user.email).first()
+    if email_user:
+        email_user.id = current_user.id
+        email_user.role = UserRole.SUPER_ADMIN if current_user.role == 'SUPER_ADMIN' else UserRole.ADMIN
+        if email_user.role != UserRole.SUPER_ADMIN:
+            email_user.company_id = current_user.company_id
+        db.commit()
+        db.refresh(email_user)
+        return email_user
+    role_value = UserRole.SUPER_ADMIN if current_user.role == 'SUPER_ADMIN' else UserRole.ADMIN
+    db_user = User(
+        id=current_user.id,
+        email=current_user.email,
+        password_hash=get_password_hash("TempPassword123!"),
+        first_name=current_user.first_name or "SSO",
+        last_name=current_user.last_name or "User",
+        role=role_value,
+        company_id=current_user.company_id if role_value != UserRole.SUPER_ADMIN else None,
+        is_active=True,
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user

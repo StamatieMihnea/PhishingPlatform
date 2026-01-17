@@ -50,6 +50,16 @@ class KeycloakService:
         return f"{self.internal_issuer}/protocol/openid-connect/token"
     
     @property
+    def admin_token_url(self) -> str:
+        """Token endpoint for admin client (master realm)."""
+        return f"{self.server_url}/realms/master/protocol/openid-connect/token"
+    
+    @property
+    def admin_users_url(self) -> str:
+        """Admin users endpoint for the realm."""
+        return f"{self.server_url}/admin/realms/{self.realm}/users"
+    
+    @property
     def userinfo_url(self) -> str:
         """Use internal URL for userinfo."""
         return f"{self.internal_issuer}/protocol/openid-connect/userinfo"
@@ -118,7 +128,7 @@ class KeycloakService:
                 algorithms=['RS256'],
                 audience=self.client_id,
                 issuer=self.issuer,
-                options={"verify_aud": False} 
+                options={"verify_aud": False, "verify_iss": False}
             )
             
             return payload
@@ -217,6 +227,177 @@ class KeycloakService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Failed to get user info"
+            )
+    
+    def get_userinfo_sync(self, access_token: str) -> Dict[str, Any]:
+        """Sync variant to get user info from Keycloak."""
+        try:
+            with httpx.Client() as client:
+                response = client.get(
+                    self.userinfo_url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Get user info failed (sync): {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to get user info"
+            )
+
+    def get_admin_token(self) -> str:
+        """Obtain an admin token using admin-cli and credentials."""
+        try:
+            data = {
+                'grant_type': 'password',
+                'client_id': settings.KEYCLOAK_ADMIN_CLIENT_ID,
+                'username': settings.KEYCLOAK_ADMIN_USERNAME,
+                'password': settings.KEYCLOAK_ADMIN_PASSWORD,
+            }
+            with httpx.Client() as client:
+                response = client.post(self.admin_token_url, data=data, timeout=10.0)
+                response.raise_for_status()
+                return response.json().get('access_token')
+        except Exception as e:
+            logger.error(f"Failed to obtain admin token: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Keycloak admin authentication failed"
+            )
+
+    def _get_realm_role(self, token: str, role_name: str) -> Dict[str, Any]:
+        try:
+            with httpx.Client() as client:
+                resp = client.get(
+                    f"{self.server_url}/admin/realms/{self.realm}/roles/{role_name}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch realm role {role_name}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to fetch role {role_name} from Keycloak"
+            )
+
+    def create_user(
+        self,
+        email: str,
+        first_name: str,
+        last_name: str,
+        password: str,
+        role: str,
+        company_id: Optional[str] = None,
+    ) -> str:
+        """
+        Create a Keycloak user, set password, assign realm role, and add company_id attribute.
+        Returns the Keycloak user ID.
+        """
+        token = self.get_admin_token()
+
+        payload: Dict[str, Any] = {
+            "username": email,
+            "email": email,
+            "firstName": first_name,
+            "lastName": last_name,
+            "enabled": True,
+            "emailVerified": True,
+        }
+        if company_id:
+            payload["attributes"] = {"company_id": [company_id]}
+
+        try:
+            with httpx.Client() as client:
+                resp = client.post(
+                    self.admin_users_url,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+                # 201 created, 409 conflict if already exists
+                if resp.status_code not in (201, 409):
+                    logger.error(f"Keycloak create user failed: {resp.status_code} {resp.text}")
+                    resp.raise_for_status()
+
+                user_id = None
+                if resp.status_code == 201 and resp.headers.get("Location"):
+                    user_id = resp.headers["Location"].rstrip("/").split("/")[-1]
+                else:
+                    # fetch existing by username/email (Keycloak may store username != email)
+                    query_urls = [
+                        f"{self.admin_users_url}?username={email}",
+                        f"{self.admin_users_url}?email={email}",
+                        f"{self.admin_users_url}?search={email}",
+                    ]
+                    for url in query_urls:
+                        query_resp = client.get(
+                            url,
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=10.0,
+                        )
+                        query_resp.raise_for_status()
+                        matches = query_resp.json()
+                        if matches:
+                            user_id = matches[0]["id"]
+                            break
+
+                if not user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to resolve Keycloak user ID"
+                    )
+
+                # Set password
+                pwd_resp = client.put(
+                    f"{self.admin_users_url}/{user_id}/reset-password",
+                    json={"type": "password", "value": password, "temporary": False},
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+                pwd_resp.raise_for_status()
+
+                # Assign role
+                role_payload = self._get_realm_role(token, role)
+                role_resp = client.post(
+                    f"{self.admin_users_url}/{user_id}/role-mappings/realm",
+                    json=[role_payload],
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+                role_resp.raise_for_status()
+
+                return user_id
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Keycloak user creation failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create user in Keycloak"
+            )
+
+    def get_user_by_id_admin(self, user_id: str) -> Dict[str, Any]:
+        """Fetch user details from Keycloak using admin API."""
+        token = self.get_admin_token()
+        try:
+            with httpx.Client() as client:
+                resp = client.get(
+                    f"{self.admin_users_url}/{user_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch user {user_id} via admin API: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to fetch user from Keycloak"
             )
 
 

@@ -9,6 +9,7 @@ from app.models.user import User, UserRole
 from app.models.company import Company
 from app.schemas.user import UserCreate, UserUpdate
 from app.core.security import get_password_hash
+from app.core.keycloak import keycloak_service
 
 
 class UserService:
@@ -62,6 +63,11 @@ class UserService:
     
     def create_user(self, user_data: UserCreate, current_user: User) -> User:
         """Create a new user."""
+        if not user_data.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is required"
+            )
         existing_user = self.get_user_by_email(user_data.email)
         if existing_user:
             raise HTTPException(
@@ -92,7 +98,26 @@ class UserService:
                     detail="Company not found"
                 )
         
+        # Create in Keycloak first to align IDs and ensure SSO login works
+        keycloak_user_id = keycloak_service.create_user(
+            email=user_data.email,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            password=user_data.password,
+            role=user_data.role.value if isinstance(user_data.role, UserRole) else user_data.role,
+            company_id=str(company_id) if company_id else None,
+        )
+
+        try:
+            user_uuid = UUID(keycloak_user_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Keycloak user id format"
+            )
+
         user = User(
+            id=user_uuid,
             email=user_data.email,
             password_hash=get_password_hash(user_data.password),
             first_name=user_data.first_name,

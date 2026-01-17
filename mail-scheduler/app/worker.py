@@ -1,4 +1,5 @@
 import json
+import socket
 import logging
 import time
 import signal
@@ -16,6 +17,9 @@ import uuid
 
 from app.config import settings
 from app.email_sender import email_sender
+
+# Reduce pika logging noise
+logging.getLogger("pika").setLevel(logging.WARNING)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,7 +115,7 @@ class EmailWorker:
             logger.info(f"Worker {settings.WORKER_ID} connected to RabbitMQ")
             return True
             
-        except AMQPConnectionError as e:
+        except (AMQPConnectionError, socket.gaierror) as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
             return False
     
@@ -205,29 +209,38 @@ class EmailWorker:
             except Exception as e:
                 logger.error(f"Error processing task {task_id}: {e}")
                 
+                task = None
                 if task_id:
                     task = db.query(EmailTask).filter(EmailTask.id == task_id).first()
+                if task:
+                    task.attempts = attempt
+                    task.last_error = str(e)
+                
+                next_attempt = attempt + 1
+                if next_attempt <= settings.MAX_RETRIES:
+                    retry_delay = settings.RETRY_DELAYS[min(attempt - 1, len(settings.RETRY_DELAYS) - 1)]
+                    message['attempt'] = next_attempt
+                    logger.info(f"Task {task_id} requeued for retry attempt {next_attempt} in {retry_delay}s")
+                    time.sleep(retry_delay)
+                    # republish to immediate queue
+                    self.channel.basic_publish(
+                        exchange="",
+                        routing_key=self.IMMEDIATE_QUEUE,
+                        body=json.dumps(message),
+                        properties=pika.BasicProperties(
+                            delivery_mode=2,
+                            priority=5,
+                            content_type="application/json"
+                        )
+                    )
                     if task:
-                        task.attempts = attempt
-                        task.last_error = str(e)
-                        
-                        if attempt < settings.MAX_RETRIES:
-                            retry_delay = settings.RETRY_DELAYS[min(attempt - 1, len(settings.RETRY_DELAYS) - 1)]
-                            message['attempt'] = attempt + 1
-                            
-                            self.channel.basic_publish(
-                                exchange="",
-                                routing_key=self.RETRY_QUEUE,
-                                body=json.dumps(message),
-                                properties=pika.BasicProperties(
-                                    delivery_mode=2,
-                                    expiration=str(retry_delay * 1000)
-                                )
-                            )
-                            logger.info(f"Task {task_id} requeued for retry in {retry_delay}s")
-                        else:
-                            task.status = EmailTaskStatus.FAILED
-                            logger.error(f"Task {task_id} failed after {attempt} attempts")
+                        task.status = EmailTaskStatus.QUEUED
+                        task.processed_at = None
+                else:
+                    if task:
+                        task.status = EmailTaskStatus.FAILED
+                        task.processed_at = datetime.utcnow()
+                    logger.error(f"Task {task_id} failed after {attempt} attempts")
                 
                 db.commit()
                 

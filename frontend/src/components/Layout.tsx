@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/store'
-import { keycloakLogout, getKeycloak } from '@/lib/keycloak'
+import { getKeycloak, keycloakLogout, keycloakConfig } from '@/lib/keycloak'
+import GlobalAlert from '@/components/GlobalAlert'
 import {
   LayoutDashboard,
   Building2,
@@ -26,10 +27,20 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [hydrated, setHydrated] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout, authSource } = useAuthStore()
+
+  useEffect(() => {
+    // Prevent hydration mismatches by waiting for client-side store hydration
+    setHydrated(true)
+  }, [])
+
+  if (!hydrated) {
+    return null
+  }
 
   const handleLogout = () => {
     // Logout from local state first
@@ -38,7 +49,23 @@ export default function Layout({ children }: LayoutProps) {
     // If authenticated via Keycloak, also logout from Keycloak
     if (authSource === 'keycloak') {
       try {
-        keycloakLogout(window.location.origin + '/login')
+        // Build explicit end-session URL for Keycloak 23+ using post_logout_redirect_uri
+        const kc = getKeycloak()
+        const redirect = window.location.origin + '/login'
+        const baseUrl = keycloakConfig.url.replace(/\/$/, '')
+        const idTokenHint = (kc as any).idToken || kc.token || ''
+        const logoutUrl = `${baseUrl}/realms/${keycloakConfig.realm}/protocol/openid-connect/logout?client_id=${encodeURIComponent(
+          keycloakConfig.clientId
+        )}&post_logout_redirect_uri=${encodeURIComponent(redirect)}${
+          idTokenHint ? `&id_token_hint=${encodeURIComponent(idTokenHint)}` : ''
+        }`
+        // Clear Keycloak tokens locally to avoid silent reauth
+        if (kc.clearToken) {
+          kc.clearToken()
+        }
+        // Use hard redirect to ensure session cleared; fall back to SDK if something fails
+        window.location.href = logoutUrl
+        return
       } catch (e) {
         // Keycloak not available, just redirect
         router.push('/login')
@@ -142,7 +169,10 @@ export default function Layout({ children }: LayoutProps) {
                     </p>
                   </div>
                   <button
-                    onClick={handleLogout}
+                    onClick={() => {
+                      setUserMenuOpen(false)
+                      handleLogout()
+                    }}
                     className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
                   >
                     <LogOut className="h-4 w-4 mr-2" />
@@ -184,6 +214,7 @@ export default function Layout({ children }: LayoutProps) {
         <main className="p-6">
           {children}
         </main>
+        <GlobalAlert />
       </div>
     </div>
   )

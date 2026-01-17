@@ -10,6 +10,7 @@ from app.models.campaign_target import CampaignTarget
 from app.models.email_task import EmailTask, EmailTaskStatus
 from app.models.email_template import EmailTemplate
 from app.models.user import User, UserRole
+from app.core.security import get_password_hash
 from app.schemas.campaign import CampaignCreate, CampaignUpdate, CampaignStats
 from app.core.config import settings
 from app.services.queue_service import get_queue_service
@@ -26,6 +27,33 @@ class CampaignService:
     def get_campaign_by_id(self, campaign_id: UUID) -> Optional[Campaign]:
         """Get a campaign by ID."""
         return self.db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    
+    def get_email_tasks(
+        self,
+        campaign_id: UUID,
+        current_user: User,
+        status_filter: Optional[EmailTaskStatus] = None,
+    ) -> Tuple[List[EmailTask], int]:
+        """Get email tasks for a campaign."""
+        campaign = self.get_campaign_by_id(campaign_id)
+        if not campaign:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found"
+            )
+        if current_user.role != UserRole.SUPER_ADMIN and campaign.company_id != current_user.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot view tasks for other companies"
+            )
+        query = self.db.query(EmailTask).join(CampaignTarget, CampaignTarget.id == EmailTask.campaign_target_id).filter(
+            CampaignTarget.campaign_id == campaign_id
+        )
+        if status_filter:
+            query = query.filter(EmailTask.status == status_filter)
+        total = query.count()
+        tasks = query.order_by(EmailTask.created_at.desc()).all()
+        return tasks, total
     
     def get_campaigns_by_company(
         self, 
@@ -44,6 +72,26 @@ class CampaignService:
         campaigns = query.order_by(Campaign.created_at.desc()).offset(skip).limit(limit).all()
         
         return campaigns, total
+
+    def get_campaigns(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        status_filter: Optional[CampaignStatus] = None,
+        company_id: Optional[UUID] = None,
+    ) -> Tuple[List[Campaign], int]:
+        """Get campaigns for super admins, optionally filtered by company."""
+        query = self.db.query(Campaign)
+
+        if company_id:
+            query = query.filter(Campaign.company_id == company_id)
+        if status_filter:
+            query = query.filter(Campaign.status == status_filter)
+
+        total = query.count()
+        campaigns = query.order_by(Campaign.created_at.desc()).offset(skip).limit(limit).all()
+
+        return campaigns, total
     
     def create_campaign(
         self, 
@@ -51,14 +99,47 @@ class CampaignService:
         current_user: User
     ) -> Campaign:
         """Create a new campaign."""
-        if not current_user.company_id:
+        target_company_id = current_user.company_id
+
+        if current_user.role == UserRole.SUPER_ADMIN:
+            # Super admin can create for a specific company; require explicit company_id
+            if not campaign_data.company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="company_id is required for super admins to create campaigns"
+                )
+            target_company_id = campaign_data.company_id
+        else:
+            if not target_company_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="User must belong to a company to create campaigns"
+                )
+
+        # Ensure creator exists locally (SSO users may not be provisioned) and has an email
+        if not current_user.email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User must belong to a company to create campaigns"
+                detail="Email is required for campaign creation"
             )
+        creator = self.db.query(User).filter(User.id == current_user.id).first()
+        if not creator:
+            creator_role = current_user.role if isinstance(current_user.role, UserRole) else UserRole[current_user.role]
+            creator = User(
+                id=current_user.id,
+                email=current_user.email,
+                password_hash=get_password_hash("TempPassword123!"),
+                first_name=current_user.first_name or "SSO",
+                last_name=current_user.last_name or "User",
+                role=creator_role,
+                company_id=target_company_id if creator_role != UserRole.SUPER_ADMIN else None,
+                is_active=True,
+            )
+            self.db.add(creator)
+            self.db.flush()
         
         campaign = Campaign(
-            company_id=current_user.company_id,
+            company_id=target_company_id,
             created_by=current_user.id,
             name=campaign_data.name,
             description=campaign_data.description,
@@ -74,7 +155,7 @@ class CampaignService:
         for user_id in campaign_data.target_user_ids:
             user = self.db.query(User).filter(
                 User.id == user_id,
-                User.company_id == current_user.company_id
+                User.company_id == target_company_id
             ).first()
             
             if user:
@@ -103,7 +184,7 @@ class CampaignService:
                 detail="Campaign not found"
             )
         
-        if campaign.company_id != current_user.company_id:
+        if current_user.role != UserRole.SUPER_ADMIN and campaign.company_id != current_user.company_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot update campaigns from other companies"
@@ -136,7 +217,7 @@ class CampaignService:
                 detail="Campaign not found"
             )
         
-        if campaign.company_id != current_user.company_id:
+        if current_user.role != UserRole.SUPER_ADMIN and campaign.company_id != current_user.company_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot delete campaigns from other companies"
@@ -167,7 +248,7 @@ class CampaignService:
                 detail="Campaign not found"
             )
         
-        if campaign.company_id != current_user.company_id:
+        if current_user.role != UserRole.SUPER_ADMIN and campaign.company_id != current_user.company_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot schedule campaigns from other companies"
@@ -226,7 +307,7 @@ class CampaignService:
                 detail="Campaign not found"
             )
         
-        if str(campaign.company_id) != str(current_user.company_id):
+        if current_user.role != UserRole.SUPER_ADMIN and str(campaign.company_id) != str(current_user.company_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot start campaigns from other companies"
@@ -352,7 +433,7 @@ class CampaignService:
                 detail="Campaign not found"
             )
         
-        if campaign.company_id != current_user.company_id:
+        if current_user.role != UserRole.SUPER_ADMIN and campaign.company_id != current_user.company_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot stop campaigns from other companies"
@@ -381,7 +462,7 @@ class CampaignService:
                 detail="Campaign not found"
             )
         
-        if campaign.company_id != current_user.company_id:
+        if current_user.role != UserRole.SUPER_ADMIN and campaign.company_id != current_user.company_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Cannot view campaigns from other companies"

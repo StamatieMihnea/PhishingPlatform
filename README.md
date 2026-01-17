@@ -131,7 +131,7 @@ The platform uses **Keycloak** for Single Sign-On (SSO) authentication:
 
 - Docker 20.10+ with Swarm support (`docker swarm init`)
 
-## Quick Start (Swarm only)
+## Quick Start
 
 1) Clone and prepare environment
 ```bash
@@ -179,7 +179,7 @@ docker stack rm phishing
 - **Admin (Demo Company)**: `admin@demo.com` / `Admin123!`
 - **Users (Demo Company)**: `user1@demo.com` / `User123!`, `user2@demo.com` / `User123!`
 
-Keycloak Admin Console (if needed): http://localhost/auth/ (admin/admin)
+Keycloak Admin Console : http://localhost/auth/ (admin/admin)
 
 ### Keycloak Configuration
 

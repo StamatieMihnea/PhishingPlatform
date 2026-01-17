@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel, Field
 from app.models.campaign import CampaignStatus
+from app.schemas.campaign_target import CampaignTargetResponse
 
 
 class CampaignBase(BaseModel):
@@ -15,6 +16,7 @@ class CampaignBase(BaseModel):
 class CampaignCreate(CampaignBase):
     """Campaign creation schema."""
     target_user_ids: List[UUID] = Field(default_factory=list)
+    company_id: Optional[UUID] = None
 
 
 class CampaignUpdate(BaseModel):
@@ -42,6 +44,11 @@ class CampaignResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class CampaignDetailResponse(CampaignResponse):
+    """Campaign response with targets included."""
+    targets: Optional[List[CampaignTargetResponse]] = None
 
 
 class CampaignListResponse(BaseModel):

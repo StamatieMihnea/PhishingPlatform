@@ -63,13 +63,15 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-    command: start
+    command: start --import-realm
     networks:
       - keycloak-net
       - backend-net
       - frontend-net
     depends_on:
       - keycloak-db
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     deploy:
       replicas: 1
       restart_policy:
@@ -95,7 +97,9 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
-      - queue-net
+      queue-net:
+        aliases:
+          - rabbitmq
     ports:
       - "15672:15672"
     deploy:
@@ -125,7 +129,8 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-phishing_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-phishing_password}
       - POSTGRES_DB=${POSTGRES_DB:-phishing_db}
-      - RABBITMQ_HOST=rabbitmq
+      # In Swarm, service name is <stack>_rabbitmq (stack defaults to "phishing")
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-phishing_rabbitmq}
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=${RABBITMQ_USER:-guest}
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
@@ -165,20 +170,6 @@ services:
       timeout: 10s
       retries: 3
 
-  mailpit:
-    image: axllent/mailpit:latest
-    ports:
-      - "8025:8025"
-    networks:
-      - queue-net
-    environment:
-      - MP_SMTP_AUTH_ACCEPT_ANY=true
-      - MP_SMTP_AUTH_ALLOW_INSECURE=true
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-
   mail-scheduler:
     image: phishingplatform-mail-scheduler:latest
     build:
@@ -190,17 +181,19 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-phishing_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-phishing_password}
       - POSTGRES_DB=${POSTGRES_DB:-phishing_db}
-      - RABBITMQ_HOST=rabbitmq
+      # In Swarm, service name is <stack>_rabbitmq (stack defaults to "phishing")
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-phishing_rabbitmq}
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=${RABBITMQ_USER:-guest}
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
-      - SMTP_HOST=${SMTP_HOST:-mailpit}
-      - SMTP_PORT=${SMTP_PORT:-1025}
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      # Mailtrap Bulk SMTP (TLS 587); keep credentials in env/secrets
+      - SMTP_HOST=${SMTP_HOST:-live.smtp.mailtrap.io}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-api}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-5c37e218e25e6ba6fbac6e64b51c6727}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-noreply@phishingplatform.com}
       - SMTP_FROM_NAME=${SMTP_FROM_NAME:-PhishingPlatform}
-      - SMTP_USE_TLS=${SMTP_USE_TLS:-false}
       - TRACKING_BASE_URL=${TRACKING_BASE_URL:-http://localhost}
     networks:
       - data-net
@@ -208,7 +201,6 @@ services:
     depends_on:
       - postgres
       - rabbitmq
-      - mailpit
     stop_grace_period: 30s
     deploy:
       replicas: 2
@@ -233,7 +225,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     environment:
-      - NEXT_PUBLIC_API_URL=
+      - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost}
       - NEXT_PUBLIC_KEYCLOAK_URL=${KEYCLOAK_PUBLIC_URL:-http://localhost/auth}
       - NEXT_PUBLIC_KEYCLOAK_REALM=${KEYCLOAK_REALM:-phishing-platform}
       - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${KEYCLOAK_FRONTEND_CLIENT_ID:-phishing-frontend}
@@ -299,17 +291,14 @@ networks:
   data-net:
     driver: overlay
     attachable: true
-    internal: true
 
   queue-net:
     driver: overlay
     attachable: true
-    internal: true
 
   keycloak-net:
     driver: overlay
     attachable: true
-    internal: true
 
 volumes:
   postgres_data:

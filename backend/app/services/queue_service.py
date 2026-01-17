@@ -87,10 +87,7 @@ class QueueService:
         self.channel.queue_declare(
             queue=self.RETRY_QUEUE,
             durable=True,
-            arguments={
-                **queue_args,
-                "x-message-ttl": 60000
-            }
+            arguments=queue_args
         )
     
     def disconnect(self):
@@ -112,7 +109,8 @@ class QueueService:
         body_html: str,
         tracking_token: str,
         immediate: bool = False,
-        priority: int = 5
+        priority: int = 5,
+        attempt: int = 1,
     ) -> bool:
         """Publish an email task to the queue."""
         try:
@@ -128,7 +126,7 @@ class QueueService:
                 "subject": subject,
                 "body_html": body_html,
                 "tracking_token": tracking_token,
-                "attempt": 1
+                "attempt": attempt
             }
             
             queue_name = self.IMMEDIATE_QUEUE if immediate else self.SCHEDULED_QUEUE

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import get_password_hash
+from app.core.keycloak import keycloak_service
 from app.models.user import User, UserRole
 from app.models.company import Company
 from app.models.email_template import EmailTemplate, DifficultyLevel
@@ -20,7 +21,17 @@ def init_default_data(db: Session):
     super_admin_email = "superadmin@phishingplatform.com"
     super_admin = db.query(User).filter(User.email == super_admin_email).first()
     if not super_admin:
+        # Ensure exists in Keycloak
+        kc_id = keycloak_service.create_user(
+            email=super_admin_email,
+            first_name="Super",
+            last_name="Admin",
+            password="SuperAdmin123!",
+            role=UserRole.SUPER_ADMIN.value,
+            company_id=None,
+        )
         super_admin = User(
+            id=kc_id,
             email=super_admin_email,
             password_hash=get_password_hash("SuperAdmin123!"),
             first_name="Super",
@@ -43,7 +54,16 @@ def init_default_data(db: Session):
         db.commit()
         logger.info("Created demo company")
         
+        demo_admin_id = keycloak_service.create_user(
+            email="admin@demo.com",
+            first_name="Demo",
+            last_name="Admin",
+            password="Admin123!",
+            role=UserRole.ADMIN.value,
+            company_id=str(demo_company.id),
+        )
         demo_admin = User(
+            id=demo_admin_id,
             email="admin@demo.com",
             password_hash=get_password_hash("Admin123!"),
             first_name="Demo",
@@ -55,7 +75,16 @@ def init_default_data(db: Session):
         db.add(demo_admin)
         
         for i in range(1, 6):
+            kc_user_id = keycloak_service.create_user(
+                email=f"user{i}@demo.com",
+                first_name=f"User{i}",
+                last_name="Demo",
+                password="User123!",
+                role=UserRole.USER.value,
+                company_id=str(demo_company.id),
+            )
             demo_user = User(
+                id=kc_user_id,
                 email=f"user{i}@demo.com",
                 password_hash=get_password_hash("User123!"),
                 first_name=f"User{i}",

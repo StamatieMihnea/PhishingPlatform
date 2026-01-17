@@ -7,9 +7,9 @@ import Table from '@/components/Table'
 import Modal from '@/components/Modal'
 import { StatusBadge } from '@/components/Badge'
 import { useAuthStore } from '@/lib/store'
-import { campaignsApi, templatesApi, usersApi } from '@/lib/api'
-import { Campaign, EmailTemplate, User } from '@/types'
-import { Plus, Target, Play, Square, Calendar, Trash2 } from 'lucide-react'
+import { campaignsApi, templatesApi, usersApi, companiesApi } from '@/lib/api'
+import { Campaign, Company, EmailTemplate, User } from '@/types'
+import { Plus, Target, Play, Square, Calendar, Trash2, Building2 } from 'lucide-react'
 
 export default function CampaignsPage() {
   const router = useRouter()
@@ -17,6 +17,7 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [users, setUsers] = useState<User[]>([])
+  const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [formData, setFormData] = useState({
@@ -24,6 +25,7 @@ export default function CampaignsPage() {
     description: '',
     template_id: '',
     target_user_ids: [] as string[],
+    company_id: '',
   })
 
   useEffect(() => {
@@ -36,14 +38,16 @@ export default function CampaignsPage() {
 
   const fetchData = async () => {
     try {
-      const [campaignsData, templatesData, usersData] = await Promise.all([
+      const [campaignsData, templatesData, usersData, companiesData] = await Promise.all([
         campaignsApi.list(),
         templatesApi.list(),
         usersApi.list(),
+        companiesApi.list(),
       ])
       setCampaigns(campaignsData.campaigns || [])
       setTemplates(templatesData.templates || [])
       setUsers(usersData.users || [])
+      setCompanies(companiesData.companies || [])
     } catch (error) {
       console.error('Error fetching data:', error)
     } finally {
@@ -56,7 +60,7 @@ export default function CampaignsPage() {
     try {
       await campaignsApi.create(formData)
       setShowCreateModal(false)
-      setFormData({ name: '', description: '', template_id: '', target_user_ids: [] })
+      setFormData({ name: '', description: '', template_id: '', target_user_ids: [], company_id: '' })
       fetchData()
     } catch (error) {
       console.error('Error creating campaign:', error)
@@ -189,6 +193,24 @@ export default function CampaignsPage() {
           size="lg"
         >
           <form onSubmit={handleCreate} className="space-y-4">
+            {companies.length > 0 && (
+              <div>
+                <label className="label">Company</label>
+                <div className="flex items-center space-x-2">
+                  <Building2 className="h-4 w-4 text-secondary-400" />
+                  <select
+                    className="input"
+                    value={formData.company_id}
+                    onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
+                  >
+                    <option value="">Select a company</option>
+                    {companies.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
             <div>
               <label className="label">Campaign Name</label>
               <input
@@ -224,23 +246,26 @@ export default function CampaignsPage() {
             <div>
               <label className="label">Target Users</label>
               <div className="max-h-48 overflow-y-auto border border-secondary-200 rounded-lg p-3 space-y-2">
-                {users.filter(u => u.role === 'USER').map((user) => (
-                  <label key={user.id} className="flex items-center space-x-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.target_user_ids.includes(user.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData({ ...formData, target_user_ids: [...formData.target_user_ids, user.id] })
-                        } else {
-                          setFormData({ ...formData, target_user_ids: formData.target_user_ids.filter(id => id !== user.id) })
-                        }
-                      }}
-                      className="rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-sm text-secondary-700">{user.first_name} {user.last_name} ({user.email})</span>
-                  </label>
-                ))}
+                {users
+                  .filter((u) => u.role === 'USER')
+                  .filter((u) => !formData.company_id || u.company_id === formData.company_id)
+                  .map((user) => (
+                    <label key={user.id} className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.target_user_ids.includes(user.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, target_user_ids: [...formData.target_user_ids, user.id] })
+                          } else {
+                            setFormData({ ...formData, target_user_ids: formData.target_user_ids.filter(id => id !== user.id) })
+                          }
+                        }}
+                        className="rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm text-secondary-700">{user.first_name} {user.last_name} ({user.email})</span>
+                    </label>
+                  ))}
               </div>
             </div>
             <div className="flex justify-end space-x-3 pt-4">
